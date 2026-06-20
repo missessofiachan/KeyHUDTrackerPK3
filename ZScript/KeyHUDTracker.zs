@@ -1,7 +1,7 @@
 // Standalone Key HUD Tracker Mod for GZDoom / UZDoom
 // Ported mathematical projection formulas from libeye by KeksDose
 
-class KHT_ProjScreen {
+class KHT_ProjScreen ui {
     protected vector2 resolution;
     protected vector2 origin;
     protected vector2 tan_fov_2;
@@ -294,23 +294,25 @@ struct KHT_Viewport {
 }
 
 class KeyHUDTrackerHandler : StaticEventHandler {
-    private transient bool isInitialized;
-    private transient bool isPrepared;
-    private transient CVar cvarRenderer;
-    private KHT_ProjScreen projection;
-    private KHT_GlScreen glProjection;
-    private KHT_SwScreen swProjection;
+    private ui bool isInitialized;
+    private ui bool isPrepared;
+    private ui CVar cvarRenderer;
+    private ui KHT_ProjScreen projection;
+    private ui KHT_GlScreen glProjection;
+    private ui KHT_SwScreen swProjection;
 
     // Cached CVars
-    private transient CVar cv_enabled;
-    private transient CVar cv_scale;
-    private transient CVar cv_alpha;
-    private transient CVar cv_show_distance;
-    private transient CVar cv_max_distance;
+    private ui CVar cv_enabled;
+    private ui CVar cv_scale;
+    private ui CVar cv_alpha;
+    private ui CVar cv_show_distance;
+    private ui CVar cv_max_distance;
+
+    private SpriteID spr_ykey, spr_bkey, spr_rkey, spr_gkey, spr_skey, spr_gold, spr_silv, spr_tnt1;
 
     private Array<Actor> keysInLevel;
 
-    private void InitCVars() {
+    private ui void InitCVars() {
         PlayerInfo player = players[consoleplayer];
         if (!player || cv_enabled) return;
 
@@ -322,13 +324,13 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         cvarRenderer = CVar.GetCVar("vid_rendermode", player);
     }
 
-    private void InitializeProjection() {
+    private ui void InitializeProjection() {
         glProjection = new("KHT_GlScreen");
         swProjection = new("KHT_SwScreen");
         isInitialized = true;
     }
 
-    private void PrepareProjection() {
+    private ui void PrepareProjection() {
         if (cvarRenderer) {
             switch (cvarRenderer.GetInt()) {
                 default:
@@ -347,8 +349,15 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
     override void WorldLoaded(WorldEvent e) {
         keysInLevel.Clear();
-        isInitialized = false;
-        isPrepared = false;
+
+        spr_ykey = Actor.GetSpriteIndex("YKEY");
+        spr_bkey = Actor.GetSpriteIndex("BKEY");
+        spr_rkey = Actor.GetSpriteIndex("RKEY");
+        spr_gkey = Actor.GetSpriteIndex("GKEY");
+        spr_skey = Actor.GetSpriteIndex("SKEY");
+        spr_gold = Actor.GetSpriteIndex("GOLD");
+        spr_silv = Actor.GetSpriteIndex("SILV");
+        spr_tnt1 = Actor.GetSpriteIndex("TNT1");
 
         // Scan keys present at level load
         ThinkerIterator it = ThinkerIterator.Create("Actor");
@@ -368,10 +377,20 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         }
     }
 
+    override void WorldTick() {
+        PlayerInfo player = players[consoleplayer];
+        for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
+            Actor k = keysInLevel[i];
+            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null) || (player && player.mo && k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())))) {
+                keysInLevel.Delete(i);
+            }
+        }
+    }
+
     private bool IsKeyActor(Actor act) const {
         if (!act || act.bDestroyed) return false;
 
-        if (act is "Key" || act.bIsKeyItem) {
+        if (act is "Key" || (act is "Inventory" && Inventory(act).bIsKeyItem)) {
             return true;
         }
 
@@ -379,15 +398,22 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         cname.MakeLower();
         if (cname.IndexOf("key") != -1 ||
             cname.IndexOf("card") != -1 ||
-            cname.IndexOf("skull") != -1 ||
-            cname.IndexOf("pass") != -1 ||
-            cname.IndexOf("token") != -1 ||
-            cname.IndexOf("badge") != -1 ||
-            cname.IndexOf("intel") != -1 ||
-            cname.IndexOf("code") != -1 ||
-            cname.IndexOf("plans") != -1) {
+            cname.IndexOf("skull") != -1) {
             return true;
         }
+
+        // WolfenDoom and custom sprite-based key checks
+        SpriteID spr = act.sprite;
+        if (spr == spr_ykey ||
+            spr == spr_bkey ||
+            spr == spr_rkey ||
+            spr == spr_gkey ||
+            spr == spr_skey ||
+            spr == spr_gold ||
+            spr == spr_silv) {
+            return true;
+        }
+
         return false;
     }
 
@@ -427,8 +453,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
             Actor k = keysInLevel[i];
 
-            if (!k || k.bDestroyed || k.owner != null || (k is "Inventory" && Inventory(k).owner != null)) {
-                keysInLevel.Delete(i);
+            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null) || (k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())))) {
                 continue;
             }
 
@@ -456,7 +481,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             Vector2 screenPos = viewport.SceneToWindow(sceneNormal);
 
             TextureID keyIcon = k.CurState.GetSpriteTexture(0);
-            if (!keyIcon.IsValid()) {
+            if (!keyIcon.IsValid() || k.CurState.Sprite == spr_tnt1) {
                 continue;
             }
 
@@ -478,7 +503,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 string distStr = String.Format("%.0fm", distanceMeters);
                 double textWidth = smallfont.StringWidth(distStr);
                 double textX = screenPos.x - textWidth / 2.0;
-                double textY = screenPos.y + (targetHeight / 2.0) + 4.0;
+                double textY = screenPos.y - (targetHeight / 2.0) - smallfont.GetHeight() - 4.0;
 
                 // Draw drop shadow using 4-directional outline offset for maximum clarity
                 screen.DrawText(smallfont, Font.CR_BLACK, textX + 1, textY + 1, distStr, DTA_Alpha, uiAlpha);
