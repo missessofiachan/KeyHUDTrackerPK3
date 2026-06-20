@@ -1,0 +1,14 @@
+AddOptionMenu "OptionsMenu"
+{
+    Submenu "Key HUD Tracker Options", "KeyHUDTrackerMenu"
+}
+
+OptionMenu "KeyHUDTrackerMenu"
+{
+    Title "KEY HUD TRACKER CONFIG"
+    Option "Enable Key Tracker", "key_tracker_enabled", "OnOff"
+    Slider "Icon Scale", "key_tracker_scale", 0.5, 3.0, 0.1
+    Slider "Opacity", "key_tracker_alpha", 0.1, 1.0, 0.05
+    Option "Show Distance", "key_tracker_show_distance", "OnOff"
+    Slider "Max Distance (Meters)", "key_tracker_max_distance", 0, 300, 10
+}
