@@ -10,7 +10,6 @@ class KHT_ProjScreen ui {
 
     protected vector3 view_ang;
     protected vector3 view_pos;
-
     protected double depth;
     protected vector2 proj_pos;
     protected vector3 diff;
@@ -42,7 +41,7 @@ class KHT_ProjScreen ui {
         Reorient(player.mo.vec3offset(0, 0, player.viewheight), (player.mo.angle, player.mo.pitch, player.mo.roll));
     }
 
-    virtual void Reorient(vector3 world_view_pos, vector3 world_ang) {
+    virtual void Reorient(vector3 world_view_pos, world_ang) {
         view_ang = world_ang;
         view_pos = world_view_pos;
     }
@@ -253,7 +252,6 @@ struct KHT_Viewport {
         viewport_aspect = hud_size.x / hud_size.y;
         viewport_bound = viewport_origin + viewport_size;
 
-        // Obtain status bar offset to position projection properly
         let statusbar_height = (window_resolution.y - Statusbar.GetTopOfStatusbar()) / window_resolution.y;
         scale_f = hud_size.x / window_resolution.x;
         scene_size = (scale_f, scale_f);
@@ -302,16 +300,29 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private ui KHT_GlScreen glProjection;
     private ui KHT_SwScreen swProjection;
 
-    // Cached CVars
     private ui CVar cv_enabled;
     private ui CVar cv_scale;
     private ui CVar cv_alpha;
     private ui CVar cv_show_distance;
     private ui CVar cv_max_distance;
+    private ui CVar cv_track_exits;
+    private ui CVar cv_track_entry;
+    private ui CVar cv_track_secrets;
+
+    // Shifted from 'ui' to play scope so they properly serialize and sync on Quickloads
+    private Array<double> exitPositionsX;
+    private Array<double> exitPositionsY;
+    private Array<double> exitPositionsZ;
+    private Array<int> exitSpecials;
+    private Array<int> secretSectors;
+
+    private Vector3 playEntryPos;
+    private bool playEntryPosValid;
 
     private SpriteID spr_ykey, spr_bkey, spr_rkey, spr_gkey, spr_skey, spr_gold, spr_silv, spr_tnt1;
 
     private Array<Actor> keysInLevel;
+    private Array<Actor> secretActors;
 
     private ui void InitCVars() {
         PlayerInfo player = players[consoleplayer];
@@ -323,6 +334,9 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         cv_show_distance = CVar.GetCVar("key_tracker_show_distance", player);
         cv_max_distance = CVar.GetCVar("key_tracker_max_distance", player);
         cv_track_weapons = CVar.GetCVar("key_tracker_track_weapons", player);
+        cv_track_exits = CVar.GetCVar("key_tracker_track_exits", player);
+        cv_track_entry = CVar.GetCVar("key_tracker_track_entry", player);
+        cv_track_secrets = CVar.GetCVar("key_tracker_track_secrets", player);
         cvarRenderer = CVar.GetCVar("vid_rendermode", player);
     }
 
@@ -351,6 +365,16 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
     override void WorldLoaded(WorldEvent e) {
         keysInLevel.Clear();
+        secretActors.Clear();
+        exitPositionsX.Clear();
+        exitPositionsY.Clear();
+        exitPositionsZ.Clear();
+        exitSpecials.Clear();
+        secretSectors.Clear();
+
+        if (!e.IsSaveGame) {
+            playEntryPosValid = false;
+        }
 
         spr_ykey = Actor.GetSpriteIndex("YKEY");
         spr_bkey = Actor.GetSpriteIndex("BKEY");
@@ -361,12 +385,36 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         spr_silv = Actor.GetSpriteIndex("SILV");
         spr_tnt1 = Actor.GetSpriteIndex("TNT1");
 
+        // Scan Exits
+        for (int i = 0; i < level.lines.Size(); i++) {
+            Line l = level.lines[i];
+            if (l.special == 243 || l.special == 244 || l.special == 74 || l.special == 75) {
+                Vector2 mid2d = (l.v1.p + l.v2.p) * 0.5;
+                double midz = l.frontsector ? l.frontsector.floorplane.ZAtPoint(mid2d) : 0.0;
+                exitPositionsX.Push(mid2d.x);
+                exitPositionsY.Push(mid2d.y);
+                exitPositionsZ.Push(midz);
+                exitSpecials.Push(l.special);
+            }
+        }
+
+        // Scan Secrets
+        for (int i = 0; i < level.sectors.Size(); i++) {
+            Sector sec = level.sectors[i];
+            if (sec.isSecret() || sec.wasSecret()) {
+                secretSectors.Push(i);
+            }
+        }
+
         // Scan keys and weapons present at level load
         ThinkerIterator it = ThinkerIterator.Create("Actor");
         Actor mo;
         while (mo = Actor(it.Next())) {
             if (mo && (IsKeyActor(mo) || mo is "Weapon")) {
                 keysInLevel.Push(mo);
+            }
+            if (mo && mo is "SecretTrigger") {
+                secretActors.Push(mo);
             }
         }
     }
@@ -377,14 +425,31 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 keysInLevel.Push(e.Thing);
             }
         }
+        if (e.Thing && e.Thing is "SecretTrigger") {
+            if (secretActors.Find(e.Thing) == secretActors.Size()) {
+                secretActors.Push(e.Thing);
+            }
+        }
     }
 
     override void WorldTick() {
+        if (!playEntryPosValid && players[consoleplayer].mo) {
+            playEntryPos = players[consoleplayer].mo.pos;
+            playEntryPosValid = true;
+        }
+
         PlayerInfo player = players[consoleplayer];
+
         for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
             Actor k = keysInLevel[i];
             if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null) || (player && player.mo && k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())))) {
                 keysInLevel.Delete(i);
+            }
+        }
+        for (int i = secretActors.Size() - 1; i >= 0; i--) {
+            Actor s = secretActors[i];
+            if (!s || s.bDestroyed) {
+                secretActors.Delete(i);
             }
         }
     }
@@ -398,13 +463,13 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
         string cname = act.GetClassName();
         cname.MakeLower();
+
         if (cname.IndexOf("key") != -1 ||
             cname.IndexOf("card") != -1 ||
             cname.IndexOf("skull") != -1) {
             return true;
         }
 
-        // WolfenDoom and custom sprite-based key checks
         SpriteID spr = act.sprite;
         if (spr == spr_ykey ||
             spr == spr_bkey ||
@@ -413,6 +478,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             spr == spr_skey ||
             spr == spr_gold ||
             spr == spr_silv) {
+      
             return true;
         }
 
@@ -425,16 +491,69 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         }
         string cname = k.GetClassName();
         cname.MakeLower();
+
         if (cname.IndexOf("red") != -1 || k.sprite == spr_rkey) return Font.CR_RED;
         if (cname.IndexOf("blue") != -1 || k.sprite == spr_bkey) return Font.CR_BLUE;
         if (cname.IndexOf("yellow") != -1 || k.sprite == spr_ykey || k.sprite == spr_gold) return Font.CR_YELLOW;
         if (cname.IndexOf("green") != -1 || k.sprite == spr_gkey) return Font.CR_GREEN;
         if (cname.IndexOf("silver") != -1 || k.sprite == spr_silv) return Font.CR_GREY;
+
         return Font.CR_WHITE;
+    }
+
+    private ui bool ProjectWorldToScreen(Vector3 worldPos, KHT_Viewport viewport, out double screenX, out double screenY) {
+        projection.ProjectWorldPos(worldPos);
+        if (!projection.IsInFront()) return false;
+        Vector2 sceneNormal = projection.ProjectToNormal();
+        if (!viewport.IsInside(sceneNormal)) return false;
+        Vector2 screenPos = viewport.SceneToWindow(sceneNormal);
+        screenX = screenPos.x;
+        screenY = screenPos.y;
+        return true;
+    }
+
+    private ui void DrawHUDMarkerText(string tagStr, int tagColor, Vector2 screenPos, double yOffset, double distanceMeters, bool showDist, double uiAlpha, double uiScale) {
+        // Scale text based on resolution (assume 1080p is scale 1.0) multiplied by user setting
+        double resScale = max(1.0, Screen.GetHeight() / 1080.0);
+        double finalScale = resScale * uiScale;
+        
+        double textHeight = smallfont.GetHeight() * finalScale;
+        double textY = screenPos.y - textHeight / 2.0 + yOffset;
+        
+        // Thicker shadow outline for higher resolutions to maintain readability
+        double outline = max(1.0, ceil(finalScale));
+
+        if (tagStr.Length() > 0) {
+            double textWidth = smallfont.StringWidth(tagStr) * finalScale;
+            double textX = screenPos.x - textWidth / 2.0;
+
+            screen.DrawText(smallfont, Font.CR_BLACK, textX + outline, textY + outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, Font.CR_BLACK, textX - outline, textY - outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, Font.CR_BLACK, textX + outline, textY - outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, Font.CR_BLACK, textX - outline, textY + outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, tagColor, textX, textY, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+
+            textY += textHeight + (2.0 * finalScale);
+        }
+
+        if (showDist) {
+            string distStr = String.Format("%.0fm", distanceMeters);
+            double dWidth = smallfont.StringWidth(distStr) * finalScale;
+            double dX = screenPos.x - dWidth / 2.0;
+
+            screen.DrawText(smallfont, Font.CR_BLACK, dX + outline, textY + outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, Font.CR_BLACK, dX - outline, textY - outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, Font.CR_BLACK, dX + outline, textY - outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            screen.DrawText(smallfont, Font.CR_BLACK, dX - outline, textY + outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+            
+            int distColor = (tagStr.Length() == 0) ? tagColor : Font.CR_WHITE;
+            screen.DrawText(smallfont, distColor, dX, textY, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+        }
     }
 
     override void RenderOverlay(RenderEvent e) {
         PlayerInfo player = players[consoleplayer];
+
         if (!player || !player.mo || player.mo.health <= 0 || gamestate == GS_TITLELEVEL || automapactive) {
             return;
         }
@@ -466,45 +585,30 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         bool showDist = cv_show_distance ? cv_show_distance.GetBool() : true;
         double maxDist = cv_max_distance ? cv_max_distance.GetFloat() : 0.0;
         bool trackWeapons = cv_track_weapons ? cv_track_weapons.GetBool() : false;
+        bool trackExits = cv_track_exits ? cv_track_exits.GetBool() : true;
+        bool trackEntry = cv_track_entry ? cv_track_entry.GetBool() : true;
+        bool trackSecrets = cv_track_secrets ? cv_track_secrets.GetBool() : true;
 
+        // Track Keys & Weapons
         for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
             Actor k = keysInLevel[i];
-
-            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null)) {
-                continue;
-            }
-
-            if (k is "Weapon" && !trackWeapons) {
-                continue;
-            }
+            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null)) continue;
+            if (k is "Weapon" && !trackWeapons) continue;
 
             double distanceUnits = (k.pos - player.mo.pos).Length();
             double distanceMeters = distanceUnits / 32.0;
 
-            if (maxDist > 0.0 && distanceMeters > maxDist) {
-                continue;
-            }
+            if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
-            // Micro-animation: float the HUD hologram icon smoothly using a sine wave
             double floatOffset = 4.0 * sin(level.time * 2.0);
             Vector3 keyPos = k.pos + (0, 0, k.height + 8.0 + floatOffset);
-
-            projection.ProjectWorldPos(keyPos);
-            if (!projection.IsInFront()) {
-                continue;
-            }
-
-            Vector2 sceneNormal = projection.ProjectToNormal();
-            if (!viewport.IsInside(sceneNormal)) {
-                continue;
-            }
-
-            Vector2 screenPos = viewport.SceneToWindow(sceneNormal);
+            
+            double screenX, screenY;
+            if (!ProjectWorldToScreen(keyPos, viewport, screenX, screenY)) continue;
+            Vector2 screenPos = (screenX, screenY);
 
             TextureID keyIcon = k.CurState.GetSpriteTexture(0);
-            if (!keyIcon.IsValid() || k.CurState.Sprite == spr_tnt1) {
-                continue;
-            }
+            if (!keyIcon.IsValid() || k.CurState.Sprite == spr_tnt1) continue;
 
             Vector2 texSize = TexMan.GetScaledSize(keyIcon);
             if (texSize.y <= 0.0) continue;
@@ -512,28 +616,111 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             double targetHeight = 32.0 * (Screen.GetHeight() / 1080.0) * uiScale;
             double scaleFactor = targetHeight / texSize.y;
 
-            // Draw the key sprite texture centered
             screen.DrawTexture(keyIcon, true, screenPos.x, screenPos.y,
                 DTA_DestWidthF, texSize.x * scaleFactor,
                 DTA_DestHeightF, texSize.y * scaleFactor,
                 DTA_CenterOffset, true,
                 DTA_Alpha, uiAlpha);
 
-            // Draw distance text in meters
-            if (showDist) {
-                string distStr = String.Format("%.0fm", distanceMeters);
-                double textWidth = smallfont.StringWidth(distStr);
-                double textX = screenPos.x - textWidth / 2.0;
-                double textY = screenPos.y - (targetHeight / 2.0) - smallfont.GetHeight() - 4.0;
+            // Dynamically scale text offset
+            double resScale = max(1.0, Screen.GetHeight() / 1080.0);
+            double finalScale = resScale * uiScale;
+            double textHeight = smallfont.GetHeight() * finalScale;
+            double yOffset = - (targetHeight / 2.0) - textHeight / 2.0 - (4.0 * finalScale);
+            
+            DrawHUDMarkerText("", GetKeyColorRange(k), screenPos, yOffset, distanceMeters, showDist, uiAlpha, uiScale);
+        }
 
-                // Draw drop shadow using 4-directional outline offset for maximum clarity
-                screen.DrawText(smallfont, Font.CR_BLACK, textX + 1, textY + 1, distStr, DTA_Alpha, uiAlpha);
-                screen.DrawText(smallfont, Font.CR_BLACK, textX - 1, textY - 1, distStr, DTA_Alpha, uiAlpha);
-                screen.DrawText(smallfont, Font.CR_BLACK, textX + 1, textY - 1, distStr, DTA_Alpha, uiAlpha);
-                screen.DrawText(smallfont, Font.CR_BLACK, textX - 1, textY + 1, distStr, DTA_Alpha, uiAlpha);
+        // Track Level Exits
+        if (trackExits) {
+            for (int i = 0; i < exitPositionsX.Size(); i++) {
+                Vector3 exitPos = (exitPositionsX[i], exitPositionsY[i], exitPositionsZ[i]);
 
-                // Draw main text with matched key/weapon color
-                screen.DrawText(smallfont, GetKeyColorRange(k), textX, textY, distStr, DTA_Alpha, uiAlpha);
+                double distanceUnits = (exitPos - player.mo.pos).Length();
+                double distanceMeters = distanceUnits / 32.0;
+
+                if (maxDist > 0.0 && distanceMeters > maxDist) continue;
+
+                double floatOffset = 2.0 * sin(level.time * 2.0 + i);
+                Vector3 projPos = exitPos + (0, 0, 32.0 + floatOffset);
+
+                double screenX, screenY;
+                if (!ProjectWorldToScreen(projPos, viewport, screenX, screenY)) continue;
+                Vector2 screenPos = (screenX, screenY);
+
+                int special = exitSpecials[i];
+                string tagStr = (special == 244) ? "SECRET EXIT" : "EXIT";
+                int tagColor = (special == 244) ? Font.CR_GOLD : Font.CR_RED;
+                
+                DrawHUDMarkerText(tagStr, tagColor, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+            }
+        }
+
+        // Track Level Entry
+        if (trackEntry && playEntryPosValid) {
+            double distanceUnits = (playEntryPos - player.mo.pos).Length();
+            double distanceMeters = distanceUnits / 32.0;
+
+            if (maxDist <= 0.0 || distanceMeters <= maxDist) {
+                double floatOffset = 2.0 * sin(level.time * 2.0);
+                Vector3 projPos = playEntryPos + (0, 0, 32.0 + floatOffset);
+
+                double screenX, screenY;
+                if (ProjectWorldToScreen(projPos, viewport, screenX, screenY)) {
+                    Vector2 screenPos = (screenX, screenY);
+                    DrawHUDMarkerText("START", Font.CR_GREEN, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+                }
+            }
+        }
+
+        // Track Secrets
+        if (trackSecrets) {
+            for (int i = 0; i < secretSectors.Size(); i++) {
+                Sector sec = level.sectors[secretSectors[i]];
+
+                if (!sec || !sec.isSecret()) continue;
+
+                Vector2 center2d = sec.centerspot;
+                double floorZ = sec.floorplane.ZAtPoint(center2d);
+                double ceilZ = sec.ceilingplane.ZAtPoint(center2d);
+                double heightClamp = min((ceilZ - floorZ) * 0.5, 48.0);
+                double midZ = floorZ + heightClamp;
+
+                Vector3 secretPos = (center2d.x, center2d.y, midZ);
+
+                double distanceUnits = (secretPos - player.mo.pos).Length();
+                double distanceMeters = distanceUnits / 32.0;
+
+                if (maxDist > 0.0 && distanceMeters > maxDist) continue;
+
+                double floatOffset = 2.0 * sin(level.time * 2.0 + i);
+                Vector3 projPos = secretPos + (0, 0, floatOffset);
+
+                double screenX, screenY;
+                if (!ProjectWorldToScreen(projPos, viewport, screenX, screenY)) continue;
+                Vector2 screenPos = (screenX, screenY);
+
+                DrawHUDMarkerText("SECRET", Font.CR_PURPLE, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+            }
+
+            for (int i = 0; i < secretActors.Size(); i++) {
+                Actor sec = secretActors[i];
+
+                if (!sec || sec.bDestroyed) continue;
+
+                double distanceUnits = (sec.pos - player.mo.pos).Length();
+                double distanceMeters = distanceUnits / 32.0;
+
+                if (maxDist > 0.0 && distanceMeters > maxDist) continue;
+
+                double floatOffset = 2.0 * sin(level.time * 2.0 + i + 100);
+                Vector3 projPos = sec.pos + (0, 0, (sec.height * 0.5) + floatOffset);
+
+                double screenX, screenY;
+                if (!ProjectWorldToScreen(projPos, viewport, screenX, screenY)) continue;
+                Vector2 screenPos = (screenX, screenY);
+
+                DrawHUDMarkerText("SECRET", Font.CR_PURPLE, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
             }
         }
     }
