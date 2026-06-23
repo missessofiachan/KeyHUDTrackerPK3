@@ -1,10 +1,7 @@
-Here is an updated version of your README that highlights all the massive new features, fixes, and configuration options we just added to the mod.
-
----
 
 # Key HUD Tracker (GZDoom / UZDoom Mod)
 
-A lightweight, standalone HUD mod for GZDoom and UZDoom that renders floating holographic markers over important level objects—visible directly through walls—to help guide you through complex maps.
+A lightweight, standalone HUD mod for GZDoom and UZDoom that renders floating holographic markers over important level objects visible directly through walls to help guide you through complex maps.
 
 Originally built just for uncollected keys, the tracker has been heavily expanded to optionally track **Secrets, Level Exits, Weapons, and the Level Start**.
 
