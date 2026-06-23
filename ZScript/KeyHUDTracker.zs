@@ -297,6 +297,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private ui bool isInitialized;
     private ui bool isPrepared;
     private ui CVar cvarRenderer;
+    private ui CVar cv_track_weapons;
     private ui KHT_ProjScreen projection;
     private ui KHT_GlScreen glProjection;
     private ui KHT_SwScreen swProjection;
@@ -321,6 +322,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         cv_alpha = CVar.GetCVar("key_tracker_alpha", player);
         cv_show_distance = CVar.GetCVar("key_tracker_show_distance", player);
         cv_max_distance = CVar.GetCVar("key_tracker_max_distance", player);
+        cv_track_weapons = CVar.GetCVar("key_tracker_track_weapons", player);
         cvarRenderer = CVar.GetCVar("vid_rendermode", player);
     }
 
@@ -359,18 +361,18 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         spr_silv = Actor.GetSpriteIndex("SILV");
         spr_tnt1 = Actor.GetSpriteIndex("TNT1");
 
-        // Scan keys present at level load
+        // Scan keys and weapons present at level load
         ThinkerIterator it = ThinkerIterator.Create("Actor");
         Actor mo;
         while (mo = Actor(it.Next())) {
-            if (mo && IsKeyActor(mo)) {
+            if (mo && (IsKeyActor(mo) || mo is "Weapon")) {
                 keysInLevel.Push(mo);
             }
         }
     }
 
     override void WorldThingSpawned(WorldEvent e) {
-        if (e.Thing && IsKeyActor(e.Thing)) {
+        if (e.Thing && (IsKeyActor(e.Thing) || e.Thing is "Weapon")) {
             if (keysInLevel.Find(e.Thing) == keysInLevel.Size()) {
                 keysInLevel.Push(e.Thing);
             }
@@ -417,6 +419,20 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         return false;
     }
 
+    private ui int GetKeyColorRange(Actor k) const {
+        if (k is "Weapon") {
+            return Font.CR_GOLD;
+        }
+        string cname = k.GetClassName();
+        cname.MakeLower();
+        if (cname.IndexOf("red") != -1 || k.sprite == spr_rkey) return Font.CR_RED;
+        if (cname.IndexOf("blue") != -1 || k.sprite == spr_bkey) return Font.CR_BLUE;
+        if (cname.IndexOf("yellow") != -1 || k.sprite == spr_ykey || k.sprite == spr_gold) return Font.CR_YELLOW;
+        if (cname.IndexOf("green") != -1 || k.sprite == spr_gkey) return Font.CR_GREEN;
+        if (cname.IndexOf("silver") != -1 || k.sprite == spr_silv) return Font.CR_GREY;
+        return Font.CR_WHITE;
+    }
+
     override void RenderOverlay(RenderEvent e) {
         PlayerInfo player = players[consoleplayer];
         if (!player || !player.mo || player.mo.health <= 0 || gamestate == GS_TITLELEVEL || automapactive) {
@@ -449,11 +465,16 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         double uiAlpha = cv_alpha ? cv_alpha.GetFloat() : 0.8;
         bool showDist = cv_show_distance ? cv_show_distance.GetBool() : true;
         double maxDist = cv_max_distance ? cv_max_distance.GetFloat() : 0.0;
+        bool trackWeapons = cv_track_weapons ? cv_track_weapons.GetBool() : false;
 
         for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
             Actor k = keysInLevel[i];
 
-            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null) || (k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())))) {
+            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null)) {
+                continue;
+            }
+
+            if (k is "Weapon" && !trackWeapons) {
                 continue;
             }
 
@@ -511,8 +532,8 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 screen.DrawText(smallfont, Font.CR_BLACK, textX + 1, textY - 1, distStr, DTA_Alpha, uiAlpha);
                 screen.DrawText(smallfont, Font.CR_BLACK, textX - 1, textY + 1, distStr, DTA_Alpha, uiAlpha);
 
-                // Draw main text
-                screen.DrawText(smallfont, Font.CR_WHITE, textX, textY, distStr, DTA_Alpha, uiAlpha);
+                // Draw main text with matched key/weapon color
+                screen.DrawText(smallfont, GetKeyColorRange(k), textX, textY, distStr, DTA_Alpha, uiAlpha);
             }
         }
     }
