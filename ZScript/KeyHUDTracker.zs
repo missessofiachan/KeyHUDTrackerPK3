@@ -41,7 +41,7 @@ class KHT_ProjScreen ui {
         Reorient(player.mo.vec3offset(0, 0, player.viewheight), (player.mo.angle, player.mo.pitch, player.mo.roll));
     }
 
-    virtual void Reorient(vector3 world_view_pos, world_ang) {
+  virtual void Reorient(vector3 world_view_pos, vector3 world_ang) {
         view_ang = world_ang;
         view_pos = world_view_pos;
     }
