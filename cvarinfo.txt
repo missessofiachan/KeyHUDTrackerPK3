@@ -9,3 +9,12 @@ user bool key_tracker_track_exits = true;
 user bool key_tracker_track_entry = true;
 user bool key_tracker_track_secrets = true;
 
+// New CVars for Items & LOS
+user bool key_tracker_track_health = false;
+user bool key_tracker_track_armor = false;
+user bool key_tracker_track_ammo = false;
+user bool key_tracker_track_artifacts = false;
+
+user bool key_tracker_objectives_los = false;
+user bool key_tracker_items_los = false;
+user float key_tracker_max_item_distance = 50.0;
