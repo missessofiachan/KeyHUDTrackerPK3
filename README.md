@@ -5,6 +5,8 @@ A lightweight, standalone HUD mod for GZDoom and UZDoom that renders floating ho
 
 Originally built just for uncollected keys, the tracker has been heavily expanded to optionally track **Secrets, Level Exits, Weapons, and the Level Start**.
 
+![GZDoom Compatible](https://img.shields.io/badge/GZDoom-v4.10%2B-blue)
+
 ## Features
 
 * **Comprehensive Tracking**: Dynamically tracks Keys, Weapons, Normal/Secret Exits, Level Starts, and undiscovered Secrets (both Sectors and Actors).
