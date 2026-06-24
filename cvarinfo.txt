@@ -1,8 +1,9 @@
+// CVARINFO
 user bool key_tracker_enabled = true;
 user float key_tracker_scale = 1.0;
 user float key_tracker_alpha = 0.8;
 user bool key_tracker_show_distance = true;
-user float key_tracker_max_distance = 0.0; // 0 = unlimited
+user float key_tracker_max_distance = 0.0;
 user bool key_tracker_track_weapons = false;
 user bool key_tracker_track_exits = true;
 user bool key_tracker_track_entry = true;

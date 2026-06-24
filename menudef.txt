@@ -6,13 +6,50 @@ AddOptionMenu "OptionsMenu"
 OptionMenu "KeyHUDTrackerMenu"
 {
     Title "KEY HUD TRACKER CONFIG"
-    Option "Enable Key Tracker", "key_tracker_enabled", "OnOff"
-    Option "Track Weapons as Keys", "key_tracker_track_weapons", "OnOff"
+    
+    Option "Enable Holo-Tracker", "key_tracker_enabled", "OnOff"
+    StaticText " "
+
+    Submenu "Core Objectives Setup", "KHT_ObjectivesMenu"
+    Submenu "Supply & Items Setup", "KHT_SuppliesMenu"
+    Submenu "Visual & Text Styling", "KHT_VisualsMenu"
+}
+
+OptionMenu "KHT_ObjectivesMenu"
+{
+    Title "CORE OBJECTIVES SETTINGS"
+    
     Option "Track Level Exits", "key_tracker_track_exits", "OnOff"
     Option "Track Level Entry", "key_tracker_track_entry", "OnOff"
     Option "Track Secrets", "key_tracker_track_secrets", "OnOff"
-    Slider "Icon Scale", "key_tracker_scale", 0.5, 3.0, 0.1
-    Slider "Opacity", "key_tracker_alpha", 0.1, 1.0, 0.05
-    Option "Show Distance", "key_tracker_show_distance", "OnOff"
-    Slider "Max Distance (Meters)", "key_tracker_max_distance", 0, 300, 10
+    Option "Line of Sight Occlusion", "key_tracker_objectives_los", "OnOff"
+    
+    StaticText " "
+    Slider "Max Objective Dist (Meters)", "key_tracker_max_distance", 0, 300, 10
+    StaticText "\c[darkgray]Note: 0 meters equals unlimited range."
+}
+
+OptionMenu "KHT_SuppliesMenu"
+{
+    Title "SUPPLY & EQUIPMENT SETTINGS"
+    
+    Option "Track Weapon Pickups", "key_tracker_track_weapons", "OnOff"
+    Option "Track Health Pickups", "key_tracker_track_health", "OnOff"
+    Option "Track Armor Pickups", "key_tracker_track_armor", "OnOff"
+    Option "Track Ammo Pickups", "key_tracker_track_ammo", "OnOff"
+    Option "Track Powerups & Artifacts", "key_tracker_track_artifacts", "OnOff"
+    Option "Line of Sight Occlusion", "key_tracker_items_los", "OnOff"
+    
+    StaticText " "
+    Slider "Proximity Supply Range", "key_tracker_max_item_distance", 10, 150, 5
+    StaticText "\c[darkgray]Controls how close you must be to see items."
+}
+
+OptionMenu "KHT_VisualsMenu"
+{
+    Title "VISUAL & TEXT STYLING"
+    
+    Option "Render Distance Value", "key_tracker_show_distance", "OnOff"
+    Slider "Global Icon Scale", "key_tracker_scale", 0.5, 3.0, 0.1
+    Slider "Hologram Opacity", "key_tracker_alpha", 0.1, 1.0, 0.05
 }
