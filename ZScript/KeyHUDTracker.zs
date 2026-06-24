@@ -3,7 +3,6 @@
 
 class KHT_ProjScreen ui {
     protected vector2 resolution;
-    protected vector2 origin;
     protected vector2 tan_fov_2;
     protected double pixel_stretch;
     protected double aspect_ratio;
@@ -41,7 +40,7 @@ class KHT_ProjScreen ui {
         Reorient(player.mo.vec3offset(0, 0, player.viewheight), (player.mo.angle, player.mo.pitch, player.mo.roll));
     }
 
-  virtual void Reorient(vector3 world_view_pos, vector3 world_ang) {
+    virtual void Reorient(vector3 world_view_pos, vector3 world_ang) {
         view_ang = world_ang;
         view_pos = world_view_pos;
     }
@@ -49,11 +48,6 @@ class KHT_ProjScreen ui {
     virtual void BeginProjection() {}
     virtual void ProjectWorldPos(vector3 world_pos) {}
     virtual vector2 ProjectToNormal() const { return (0, 0); }
-    virtual vector2 ProjectToScreen() const { return (0, 0); }
-
-    virtual vector2 ProjectToCustom(vector2 origin, vector2 resolution) const {
-        return (0, 0);
-    }
 
     bool IsInFront() const {
         return 0 < depth;
@@ -65,24 +59,6 @@ class KHT_ProjScreen ui {
         }
         return true;
     }
-
-    virtual void BeginDeprojection() {}
-    virtual vector3 DeprojectNormalToDiff(vector2 normal_pos, double depth = 1) const { return (0, 0, 0); }
-    virtual vector3 DeprojectScreenToDiff(vector2 screen_pos, double depth = 1) const { return (0, 0, 0); }
-    virtual vector3 DeprojectCustomToDiff(vector2 origin, vector2 resolution, vector2 screen_pos, double depth = 1) const { return (0, 0, 0); }
-
-    vector2 NormalToScreen(vector2 normal_pos) const {
-        normal_pos = 0.5 * (normal_pos + (1, 1));
-        return (normal_pos.x * resolution.x, normal_pos.y * resolution.y);
-    }
-
-    vector2 ScreenToNormal(vector2 screen_pos) const {
-        screen_pos = (screen_pos.x / resolution.x, screen_pos.y / resolution.y);
-        return 2 * screen_pos - (1, 1);
-    }
-
-    vector3 Difference() const { return diff; }
-    double Distance() const { return diff.length(); }
 }
 
 class KHT_GlScreen : KHT_ProjScreen {
@@ -132,39 +108,6 @@ class KHT_GlScreen : KHT_ProjScreen {
     override vector2 ProjectToNormal() const {
         return proj_pos / depth;
     }
-
-    override vector2 ProjectToScreen() const {
-        let normal_pos = proj_pos / depth + (1, 1);
-        return 0.5 * (normal_pos.x * resolution.x, normal_pos.y * resolution.y);
-    }
-
-    override vector2 ProjectToCustom(vector2 origin, vector2 resolution) const {
-        let normal_pos = proj_pos / depth + (1, 1);
-        return origin + 0.5 * (normal_pos.x * resolution.x, normal_pos.y * resolution.y);
-    }
-
-    protected vector3 forw_out;
-    protected vector3 right_out;
-    protected vector3 down_out;
-
-    override void BeginDeprojection() {
-        forw_out  = forw_unit;
-        right_out = right_unit * tan_fov_2.x;
-        down_out  = down_unit  * tan_fov_2.y;
-
-        forw_out.z  /= pixel_stretch;
-        right_out.z /= pixel_stretch;
-        down_out.z  /= pixel_stretch;
-    }
-
-    override vector3 DeprojectNormalToDiff(vector2 normal_pos, double depth) const {
-        return depth * (forw_out + normal_pos.x * right_out + normal_pos.y * down_out);
-    }
-
-    override vector3 DeprojectScreenToDiff(vector2 screen_pos, double depth) const {
-        let normal_pos = 2 * (screen_pos.x / resolution.x, screen_pos.y / resolution.y) - (1, 1);
-        return depth * (forw_out + normal_pos.x * right_out + normal_pos.y * down_out);
-    }
 }
 
 class KHT_SwScreen : KHT_ProjScreen {
@@ -196,37 +139,6 @@ class KHT_SwScreen : KHT_ProjScreen {
     override vector2 ProjectToNormal() const {
         return proj_pos / depth;
     }
-
-    override vector2 ProjectToScreen() const {
-        let normal_pos = proj_pos / depth + (1, 1);
-        return 0.5 * (normal_pos.x * resolution.x, normal_pos.y * resolution.y);
-    }
-
-    override vector2 ProjectToCustom(vector2 origin, vector2 resolution) const {
-        let normal_pos = proj_pos / depth + (1, 1);
-        return origin + 0.5 * (normal_pos.x * resolution.x, normal_pos.y * resolution.y);
-    }
-
-    protected vector3 forw_planar_out;
-    protected vector3 right_planar_out;
-    protected vector3 down_planar_out;
-
-    override void BeginDeprojection() {
-        forw_planar_out.xy  = forw_planar_unit.xy;
-        forw_planar_out.z   = 0;
-        right_planar_out.xy = tan_fov_2.x * right_planar_unit;
-        right_planar_out.z  = 0;
-        down_planar_out     = (0, 0, tan_fov_2.y / pixel_stretch);
-    }
-
-    override vector3 DeprojectNormalToDiff(vector2 normal_pos, double depth) const {
-        return depth * (forw_planar_out + normal_pos.x * right_planar_out - (0, 0, forw_planar_unit.z) - normal_pos.y * down_planar_out);
-    }
-
-    override vector3 DeprojectScreenToDiff(vector2 screen_pos, double depth) const {
-        let normal_pos = 2 * (screen_pos.x / resolution.x, screen_pos.y / resolution.y) - (1, 1);
-        return depth * (forw_planar_out + normal_pos.x * right_planar_out - (0, 0, forw_planar_unit.z) - normal_pos.y * down_planar_out);
-    }
 }
 
 struct KHT_Viewport {
@@ -252,7 +164,6 @@ struct KHT_Viewport {
         viewport_aspect = hud_size.x / hud_size.y;
         viewport_bound = viewport_origin + viewport_size;
 
-        let statusbar_height = (window_resolution.y - Statusbar.GetTopOfStatusbar()) / window_resolution.y;
         scale_f = hud_size.x / window_resolution.x;
         scene_size = (scale_f, scale_f);
         scene_origin = viewport_origin - (0, 0.5 * (scene_size.y - viewport_size.y));
@@ -268,26 +179,9 @@ struct KHT_Viewport {
         return true;
     }
 
-    vector2 SceneToCustom(vector2 scene_pos, vector2 resolution) const {
-        let normal_pos = 0.5 * ((scene_pos.x + 1) * scene_size.x, (scene_pos.y + 1) * scene_size.y);
-        return ((scene_origin.x + normal_pos.x) * resolution.x, (scene_origin.y + normal_pos.y) * resolution.y);
-    }
-
     vector2 SceneToWindow(vector2 scene_pos) const {
-        return SceneToCustom(scene_pos, (Screen.GetWidth(), Screen.GetHeight()));
-    }
-
-    vector2 ViewportToCustom(vector2 viewport_pos, vector2 resolution) const {
-        let normal_pos = 0.5 * ((viewport_pos.x + 1) * viewport_size.x, (viewport_pos.y + 1) * viewport_size.y);
-        return ((viewport_origin.x + normal_pos.x) * resolution.x, (viewport_origin.y + normal_pos.y) * resolution.y);
-    }
-
-    vector2 ViewportToWindow(vector2 viewport_pos) const {
-        return ViewportToCustom(viewport_pos, (Screen.GetWidth(), Screen.GetHeight()));
-    }
-
-    double Scale() const {
-        return scale_f;
+        let normal_pos = 0.5 * ((scene_pos.x + 1) * scene_size.x, (scene_pos.y + 1) * scene_size.y);
+        return ((scene_origin.x + normal_pos.x) * Screen.GetWidth(), (scene_origin.y + normal_pos.y) * Screen.GetHeight());
     }
 }
 
@@ -309,7 +203,6 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private ui CVar cv_track_entry;
     private ui CVar cv_track_secrets;
 
-    // Shifted from 'ui' to play scope so they properly serialize and sync on Quickloads
     private Array<double> exitPositionsX;
     private Array<double> exitPositionsY;
     private Array<double> exitPositionsZ;
@@ -318,7 +211,6 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
     private Vector3 playEntryPos;
     private bool playEntryPosValid;
-
     private SpriteID spr_ykey, spr_bkey, spr_rkey, spr_gkey, spr_skey, spr_gold, spr_silv, spr_tnt1;
 
     private Array<Actor> keysInLevel;
@@ -439,7 +331,6 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         }
 
         PlayerInfo player = players[consoleplayer];
-
         for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
             Actor k = keysInLevel[i];
             if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null) || (player && player.mo && k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())))) {
@@ -456,29 +347,18 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
     private bool IsKeyActor(Actor act) const {
         if (!act || act.bDestroyed) return false;
-
         if (act is "Key" || (act is "Inventory" && Inventory(act).bIsKeyItem)) {
             return true;
         }
 
         string cname = act.GetClassName();
         cname.MakeLower();
-
-        if (cname.IndexOf("key") != -1 ||
-            cname.IndexOf("card") != -1 ||
-            cname.IndexOf("skull") != -1) {
+        if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) {
             return true;
         }
 
         SpriteID spr = act.sprite;
-        if (spr == spr_ykey ||
-            spr == spr_bkey ||
-            spr == spr_rkey ||
-            spr == spr_gkey ||
-            spr == spr_skey ||
-            spr == spr_gold ||
-            spr == spr_silv) {
-      
+        if (spr == spr_ykey || spr == spr_bkey || spr == spr_rkey || spr == spr_gkey || spr == spr_skey || spr == spr_gold || spr == spr_silv) {
             return true;
         }
 
@@ -491,13 +371,11 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         }
         string cname = k.GetClassName();
         cname.MakeLower();
-
         if (cname.IndexOf("red") != -1 || k.sprite == spr_rkey) return Font.CR_RED;
         if (cname.IndexOf("blue") != -1 || k.sprite == spr_bkey) return Font.CR_BLUE;
         if (cname.IndexOf("yellow") != -1 || k.sprite == spr_ykey || k.sprite == spr_gold) return Font.CR_YELLOW;
         if (cname.IndexOf("green") != -1 || k.sprite == spr_gkey) return Font.CR_GREEN;
         if (cname.IndexOf("silver") != -1 || k.sprite == spr_silv) return Font.CR_GREY;
-
         return Font.CR_WHITE;
     }
 
@@ -512,27 +390,27 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         return true;
     }
 
+    private ui void DrawTextWithOutline(string text, int color, double x, double y, double scale, double alpha, double outline) {
+        screen.DrawText(smallfont, Font.CR_BLACK, x + outline, y + outline, text, DTA_ScaleX, scale, DTA_ScaleY, scale, DTA_Alpha, alpha);
+        screen.DrawText(smallfont, Font.CR_BLACK, x - outline, y - outline, text, DTA_ScaleX, scale, DTA_ScaleY, scale, DTA_Alpha, alpha);
+        screen.DrawText(smallfont, Font.CR_BLACK, x + outline, y - outline, text, DTA_ScaleX, scale, DTA_ScaleY, scale, DTA_Alpha, alpha);
+        screen.DrawText(smallfont, Font.CR_BLACK, x - outline, y + outline, text, DTA_ScaleX, scale, DTA_ScaleY, scale, DTA_Alpha, alpha);
+        screen.DrawText(smallfont, color, x, y, text, DTA_ScaleX, scale, DTA_ScaleY, scale, DTA_Alpha, alpha);
+    }
+
     private ui void DrawHUDMarkerText(string tagStr, int tagColor, Vector2 screenPos, double yOffset, double distanceMeters, bool showDist, double uiAlpha, double uiScale) {
-        // Scale text based on resolution (assume 1080p is scale 1.0) multiplied by user setting
         double resScale = max(1.0, Screen.GetHeight() / 1080.0);
         double finalScale = resScale * uiScale;
         
         double textHeight = smallfont.GetHeight() * finalScale;
         double textY = screenPos.y - textHeight / 2.0 + yOffset;
-        
-        // Thicker shadow outline for higher resolutions to maintain readability
         double outline = max(1.0, ceil(finalScale));
 
         if (tagStr.Length() > 0) {
             double textWidth = smallfont.StringWidth(tagStr) * finalScale;
             double textX = screenPos.x - textWidth / 2.0;
 
-            screen.DrawText(smallfont, Font.CR_BLACK, textX + outline, textY + outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, Font.CR_BLACK, textX - outline, textY - outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, Font.CR_BLACK, textX + outline, textY - outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, Font.CR_BLACK, textX - outline, textY + outline, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, tagColor, textX, textY, tagStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-
+            DrawTextWithOutline(tagStr, tagColor, textX, textY, finalScale, uiAlpha, outline);
             textY += textHeight + (2.0 * finalScale);
         }
 
@@ -540,20 +418,14 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             string distStr = String.Format("%.0fm", distanceMeters);
             double dWidth = smallfont.StringWidth(distStr) * finalScale;
             double dX = screenPos.x - dWidth / 2.0;
-
-            screen.DrawText(smallfont, Font.CR_BLACK, dX + outline, textY + outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, Font.CR_BLACK, dX - outline, textY - outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, Font.CR_BLACK, dX + outline, textY - outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            screen.DrawText(smallfont, Font.CR_BLACK, dX - outline, textY + outline, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
-            
             int distColor = (tagStr.Length() == 0) ? tagColor : Font.CR_WHITE;
-            screen.DrawText(smallfont, distColor, dX, textY, distStr, DTA_ScaleX, finalScale, DTA_ScaleY, finalScale, DTA_Alpha, uiAlpha);
+
+            DrawTextWithOutline(distStr, distColor, dX, textY, finalScale, uiAlpha, outline);
         }
     }
 
     override void RenderOverlay(RenderEvent e) {
         PlayerInfo player = players[consoleplayer];
-
         if (!player || !player.mo || player.mo.health <= 0 || gamestate == GS_TITLELEVEL || automapactive) {
             return;
         }
@@ -594,10 +466,8 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             Actor k = keysInLevel[i];
             if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null)) continue;
             if (k is "Weapon" && !trackWeapons) continue;
-
             double distanceUnits = (k.pos - player.mo.pos).Length();
             double distanceMeters = distanceUnits / 32.0;
-
             if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
             double floatOffset = 4.0 * sin(level.time * 2.0);
@@ -612,22 +482,21 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
             Vector2 texSize = TexMan.GetScaledSize(keyIcon);
             if (texSize.y <= 0.0) continue;
-
-            double targetHeight = 32.0 * (Screen.GetHeight() / 1080.0) * uiScale;
+            
+            double targetHeight = 16.0 * (Screen.GetHeight() / 1080.0) * uiScale;
             double scaleFactor = targetHeight / texSize.y;
-
             screen.DrawTexture(keyIcon, true, screenPos.x, screenPos.y,
                 DTA_DestWidthF, texSize.x * scaleFactor,
                 DTA_DestHeightF, texSize.y * scaleFactor,
                 DTA_CenterOffset, true,
                 DTA_Alpha, uiAlpha);
 
-            // Dynamically scale text offset
             double resScale = max(1.0, Screen.GetHeight() / 1080.0);
             double finalScale = resScale * uiScale;
             double textHeight = smallfont.GetHeight() * finalScale;
-            double yOffset = - (targetHeight / 2.0) - textHeight / 2.0 - (4.0 * finalScale);
             
+            // FLIPPED: Turned positive to push the distance meter BELOW the icon center 
+            double yOffset = (targetHeight / 2.0) + textHeight / 2.0 + (2.0 * finalScale);
             DrawHUDMarkerText("", GetKeyColorRange(k), screenPos, yOffset, distanceMeters, showDist, uiAlpha, uiScale);
         }
 
@@ -635,10 +504,8 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         if (trackExits) {
             for (int i = 0; i < exitPositionsX.Size(); i++) {
                 Vector3 exitPos = (exitPositionsX[i], exitPositionsY[i], exitPositionsZ[i]);
-
                 double distanceUnits = (exitPos - player.mo.pos).Length();
                 double distanceMeters = distanceUnits / 32.0;
-
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
                 double floatOffset = 2.0 * sin(level.time * 2.0 + i);
@@ -677,7 +544,6 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         if (trackSecrets) {
             for (int i = 0; i < secretSectors.Size(); i++) {
                 Sector sec = level.sectors[secretSectors[i]];
-
                 if (!sec || !sec.isSecret()) continue;
 
                 Vector2 center2d = sec.centerspot;
@@ -685,12 +551,10 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 double ceilZ = sec.ceilingplane.ZAtPoint(center2d);
                 double heightClamp = min((ceilZ - floorZ) * 0.5, 48.0);
                 double midZ = floorZ + heightClamp;
-
                 Vector3 secretPos = (center2d.x, center2d.y, midZ);
 
                 double distanceUnits = (secretPos - player.mo.pos).Length();
                 double distanceMeters = distanceUnits / 32.0;
-
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
                 double floatOffset = 2.0 * sin(level.time * 2.0 + i);
@@ -705,12 +569,10 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
             for (int i = 0; i < secretActors.Size(); i++) {
                 Actor sec = secretActors[i];
-
                 if (!sec || sec.bDestroyed) continue;
 
                 double distanceUnits = (sec.pos - player.mo.pos).Length();
                 double distanceMeters = distanceUnits / 32.0;
-
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
                 double floatOffset = 2.0 * sin(level.time * 2.0 + i + 100);
