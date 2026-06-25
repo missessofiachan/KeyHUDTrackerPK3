@@ -486,7 +486,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         }
     }
 
-    // --- UI CONTEXT: Read from arrays safely ---
+// --- UI CONTEXT: Read from arrays safely ---
     override void RenderOverlay(RenderEvent e) {
         PlayerInfo player = players[consoleplayer];
         if (!player || !player.mo || player.mo.health <= 0 || gamestate == GS_TITLELEVEL || automapactive) return;
@@ -554,9 +554,12 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             double distanceUnits = (k.pos - player.mo.pos).Length();
             double distanceMeters = distanceUnits / 32.0;
 
+            // BUGFIX: Safety catch for async timing between Play and UI ticks
+            bool isVis = (i < itemsVisible.Size()) ? itemsVisible[i] : true;
+
             if (isKey) {
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
-                if (objLOS && !itemsVisible[i]) continue;
+                if (objLOS && !isVis) continue;
             } else {
                 if (isWeapon && !trackWeapons) continue;
                 if (isHealth && !trackHealth) continue;
@@ -564,7 +567,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 if (isAmmo && !trackAmmo) continue;
                 if (isArtifact && !trackArtifacts) continue;
                 if (maxItemDist > 0.0 && distanceMeters > maxItemDist) continue;
-                if (itemLOS && !itemsVisible[i]) continue;
+                if (itemLOS && !isVis) continue;
             }
 
             double floatOffset = 4.0 * sin(level.time * 2.0);
@@ -608,7 +611,9 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         // --- Track Level Exits ---
         if (trackExits) {
             for (int i = 0; i < exitPositionsX.Size(); i++) {
-                if (objLOS && !exitsVisible[i]) continue;
+                // BUGFIX: Bounds checking
+                bool isVis = (i < exitsVisible.Size()) ? exitsVisible[i] : true;
+                if (objLOS && !isVis) continue;
                 
                 Vector3 exitPos = (exitPositionsX[i], exitPositionsY[i], exitPositionsZ[i]);
                 double distanceUnits = (exitPos - player.mo.pos).Length();
@@ -650,7 +655,9 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         // --- Track Secrets ---
         if (trackSecrets) {
             for (int i = 0; i < secretSectors.Size(); i++) {
-                if (objLOS && !secretSecVisible[i]) continue;
+                // BUGFIX: Bounds checking
+                bool isVis = (i < secretSecVisible.Size()) ? secretSecVisible[i] : true;
+                if (objLOS && !isVis) continue;
 
                 Sector sec = level.sectors[secretSectors[i]];
                 if (!sec || !sec.isSecret()) continue;
@@ -673,7 +680,9 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             }
 
             for (int i = 0; i < secretActors.Size(); i++) {
-                if (objLOS && !secretActVisible[i]) continue;
+                // BUGFIX: Bounds checking
+                bool isVis = (i < secretActVisible.Size()) ? secretActVisible[i] : true;
+                if (objLOS && !isVis) continue;
 
                 Actor sec = secretActors[i];
                 if (!sec || sec.bDestroyed) continue;
