@@ -67,7 +67,7 @@ class KHT_GlScreen : KHT_ProjScreen {
     protected vector3 forw_unit;
     protected vector3 right_unit;
     protected vector3 down_unit;
-
+    
     override void Reorient(vector3 world_view_pos, vector3 world_ang) {
         world_ang.y = VectorAngle(cos(world_ang.y), sin(world_ang.y) * pixel_stretch);
         super.Reorient(world_view_pos, world_ang);
@@ -90,7 +90,7 @@ class KHT_GlScreen : KHT_ProjScreen {
     protected vector3 forw_in;
     protected vector3 right_in;
     protected vector3 down_in;
-
+    
     override void BeginProjection() {
         forw_in  = forw_unit;
         right_in = right_unit / tan_fov_2.x;
@@ -115,7 +115,7 @@ class KHT_GlScreen : KHT_ProjScreen {
 class KHT_SwScreen : KHT_ProjScreen {
     protected vector2 right_planar_unit;
     protected vector3 forw_planar_unit;
-
+    
     override void Reorient(vector3 world_view_pos, vector3 world_ang) {
         super.Reorient(world_view_pos, world_ang);
 
@@ -125,7 +125,7 @@ class KHT_SwScreen : KHT_ProjScreen {
 
     protected vector3 forw_planar_in;
     protected vector2 right_planar_in;
-
+    
     override void BeginProjection() {
         right_planar_in = right_planar_unit / tan_fov_2.x;
         forw_planar_in  = forw_planar_unit;
@@ -153,7 +153,7 @@ struct KHT_Viewport {
     private double viewport_aspect;
     private double scale_f;
     private vector2 scene_to_viewport;
-
+    
     ui void FromHud() const {
         scene_aspect = Screen.GetAspectRatio();
         vector2 hud_origin;
@@ -191,11 +191,11 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private ui bool isInitialized;
     private ui bool isPrepared;
     private ui CVar cvarRenderer;
-    private ui CVar cv_track_weapons;
     private ui KHT_ProjScreen projection;
     private ui KHT_GlScreen glProjection;
     private ui KHT_SwScreen swProjection;
 
+    // UI CVars
     private ui CVar cv_enabled;
     private ui CVar cv_scale;
     private ui CVar cv_alpha;
@@ -204,6 +204,14 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private ui CVar cv_track_exits;
     private ui CVar cv_track_entry;
     private ui CVar cv_track_secrets;
+    private ui CVar cv_track_weapons;
+    private ui CVar cv_track_health;
+    private ui CVar cv_track_armor;
+    private ui CVar cv_track_ammo;
+    private ui CVar cv_track_artifacts;
+    private ui CVar cv_objectives_los;
+    private ui CVar cv_items_los;
+    private ui CVar cv_max_item_dist;
 
     private Array<double> exitPositionsX;
     private Array<double> exitPositionsY;
@@ -214,9 +222,15 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private Vector3 playEntryPos;
     private bool playEntryPosValid;
     private SpriteID spr_ykey, spr_bkey, spr_rkey, spr_gkey, spr_skey, spr_gold, spr_silv, spr_tnt1;
-
-    private Array<Actor> keysInLevel;
+    private Array<Actor> itemsInLevel; 
     private Array<Actor> secretActors;
+
+    // PLAY-side visibility state arrays (Bridging Play/UI barrier)
+    private Array<bool> itemsVisible;
+    private Array<bool> exitsVisible;
+    private Array<bool> secretSecVisible;
+    private Array<bool> secretActVisible;
+    private bool entryVisible;
 
     private ui void InitCVars() {
         PlayerInfo player = players[consoleplayer];
@@ -231,6 +245,14 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         cv_track_exits = CVar.GetCVar("key_tracker_track_exits", player);
         cv_track_entry = CVar.GetCVar("key_tracker_track_entry", player);
         cv_track_secrets = CVar.GetCVar("key_tracker_track_secrets", player);
+        cv_track_health = CVar.GetCVar("key_tracker_track_health", player);
+        cv_track_armor = CVar.GetCVar("key_tracker_track_armor", player);
+        cv_track_ammo = CVar.GetCVar("key_tracker_track_ammo", player);
+        cv_track_artifacts = CVar.GetCVar("key_tracker_track_artifacts", player);
+        cv_objectives_los = CVar.GetCVar("key_tracker_objectives_los", player);
+        cv_items_los = CVar.GetCVar("key_tracker_items_los", player);
+        cv_max_item_dist = CVar.GetCVar("key_tracker_max_item_distance", player);
+        
         cvarRenderer = CVar.GetCVar("vid_rendermode", player);
     }
 
@@ -243,13 +265,9 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     private ui void PrepareProjection() {
         if (cvarRenderer) {
             switch (cvarRenderer.GetInt()) {
-                default:
-                    projection = glProjection;
-                    break;
+                default: projection = glProjection; break;
                 case 0:
-                case 1:
-                    projection = swProjection;
-                    break;
+                case 1: projection = swProjection; break;
             }
         } else {
             projection = glProjection;
@@ -258,7 +276,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
     }
 
     override void WorldLoaded(WorldEvent e) {
-        keysInLevel.Clear();
+        itemsInLevel.Clear();
         secretActors.Clear();
         exitPositionsX.Clear();
         exitPositionsY.Clear();
@@ -292,7 +310,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             }
         }
 
-        // Scan Secrets
+        // Scan Sectors
         for (int i = 0; i < level.sectors.Size(); i++) {
             Sector sec = level.sectors[i];
             if (sec.isSecret() || sec.wasSecret()) {
@@ -300,23 +318,18 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             }
         }
 
-        // Scan keys and weapons present at level load
         ThinkerIterator it = ThinkerIterator.Create("Actor");
         Actor mo;
         while (mo = Actor(it.Next())) {
-            if (mo && (IsKeyActor(mo) || mo is "Weapon")) {
-                keysInLevel.Push(mo);
-            }
-            if (mo && mo is "SecretTrigger") {
-                secretActors.Push(mo);
-            }
+            if (mo && IsTrackableActor(mo)) itemsInLevel.Push(mo);
+            if (mo && mo is "SecretTrigger") secretActors.Push(mo);
         }
     }
 
     override void WorldThingSpawned(WorldEvent e) {
-        if (e.Thing && (IsKeyActor(e.Thing) || e.Thing is "Weapon")) {
-            if (keysInLevel.Find(e.Thing) == keysInLevel.Size()) {
-                keysInLevel.Push(e.Thing);
+        if (e.Thing && IsTrackableActor(e.Thing)) {
+            if (itemsInLevel.Find(e.Thing) == itemsInLevel.Size()) {
+                itemsInLevel.Push(e.Thing);
             }
         }
         if (e.Thing && e.Thing is "SecretTrigger") {
@@ -326,17 +339,21 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         }
     }
 
+    // --- PLAY CONTEXT: Calculate physics and LOS traces here ---
     override void WorldTick() {
-        if (!playEntryPosValid && players[consoleplayer].mo) {
-            playEntryPos = players[consoleplayer].mo.pos;
+        PlayerInfo player = players[consoleplayer];
+        if (!player || !player.mo) return;
+
+        if (!playEntryPosValid) {
+            playEntryPos = player.mo.pos;
             playEntryPosValid = true;
         }
 
-        PlayerInfo player = players[consoleplayer];
-        for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
-            Actor k = keysInLevel[i];
-            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null) || (player && player.mo && k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())))) {
-                keysInLevel.Delete(i);
+        // 1. Cleanup Stale Data
+        for (int i = itemsInLevel.Size() - 1; i >= 0; i--) {
+            Actor k = itemsInLevel[i];
+            if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null)) {
+                itemsInLevel.Delete(i);
             }
         }
         for (int i = secretActors.Size() - 1; i >= 0; i--) {
@@ -345,32 +362,76 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 secretActors.Delete(i);
             }
         }
+
+        // 2. Safely read CVars from Play Context
+        bool objLOS = CVar.GetCVar("key_tracker_objectives_los", player).GetBool();
+        bool itemLOS = CVar.GetCVar("key_tracker_items_los", player).GetBool();
+
+        // 3. Populate Line-Of-Sight Arrays
+        itemsVisible.Resize(itemsInLevel.Size());
+        for (int i = 0; i < itemsInLevel.Size(); i++) {
+            itemsVisible[i] = itemLOS ? CheckLOSPlay(itemsInLevel[i].pos + (0, 0, itemsInLevel[i].height * 0.5)) : true;
+        }
+
+        exitsVisible.Resize(exitPositionsX.Size());
+        for (int i = 0; i < exitPositionsX.Size(); i++) {
+            exitsVisible[i] = objLOS ? CheckLOSPlay((exitPositionsX[i], exitPositionsY[i], exitPositionsZ[i] + 32.0)) : true;
+        }
+
+        entryVisible = objLOS ? CheckLOSPlay(playEntryPos + (0, 0, 32.0)) : true;
+
+        secretSecVisible.Resize(secretSectors.Size());
+        for (int i = 0; i < secretSectors.Size(); i++) {
+            if (objLOS) {
+                Sector sec = level.sectors[secretSectors[i]];
+                Vector2 center2d = sec.centerspot;
+                double floorZ = sec.floorplane.ZAtPoint(center2d);
+                double ceilZ = sec.ceilingplane.ZAtPoint(center2d);
+                double midZ = floorZ + min((ceilZ - floorZ) * 0.5, 48.0);
+                secretSecVisible[i] = CheckLOSPlay((center2d.x, center2d.y, midZ));
+            } else {
+                secretSecVisible[i] = true;
+            }
+        }
+
+        secretActVisible.Resize(secretActors.Size());
+        for (int i = 0; i < secretActors.Size(); i++) {
+            secretActVisible[i] = objLOS ? CheckLOSPlay(secretActors[i].pos + (0, 0, secretActors[i].height * 0.5)) : true;
+        }
     }
 
-    private bool IsKeyActor(Actor act) const {
+    // Engine Safe physics check function
+    private bool CheckLOSPlay(Vector3 targetPos) {
+        PlayerInfo player = players[consoleplayer];
+        if (!player || !player.mo) return false;
+        
+        Vector3 viewPos = player.mo.vec3offset(0, 0, player.viewheight);
+        Vector3 diff = level.Vec3Diff(viewPos, targetPos);
+        double dist = diff.Length();
+        if (dist <= 0) return true;
+        
+        double ang = VectorAngle(diff.x, diff.y);
+        double ptch = -VectorAngle(diff.xy.Length(), diff.z); 
+        
+        FLineTraceData trace;
+        player.mo.LineTrace(ang, dist, ptch, TRF_NOSKY | TRF_THRUACTORS, player.viewheight, data: trace);
+        return (trace.HitType != TRACE_HitWall);
+    }
+
+    private bool IsTrackableActor(Actor act) const {
         if (!act || act.bDestroyed) return false;
-        if (act is "Key" || (act is "Inventory" && Inventory(act).bIsKeyItem)) {
-            return true;
-        }
+        if (act is "Key" || (act is "Inventory" && Inventory(act).bIsKeyItem)) return true;
+        if (act is "Weapon" || act is "Health" || act is "Armor" || act is "Ammo" || act is "PowerupGiver") return true;
 
         string cname = act.GetClassName();
         cname.MakeLower();
-        if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) {
-            return true;
-        }
-
+        if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) return true;
         SpriteID spr = act.sprite;
-        if (spr == spr_ykey || spr == spr_bkey || spr == spr_rkey || spr == spr_gkey || spr == spr_skey || spr == spr_gold || spr == spr_silv) {
-            return true;
-        }
-
+        if (spr == spr_ykey || spr == spr_bkey || spr == spr_rkey || spr == spr_gkey || spr == spr_skey || spr == spr_gold || spr == spr_silv) return true;
         return false;
     }
 
     private ui int GetKeyColorRange(Actor k) const {
-        if (k is "Weapon") {
-            return Font.CR_GOLD;
-        }
         string cname = k.GetClassName();
         cname.MakeLower();
         if (cname.IndexOf("red") != -1 || k.sprite == spr_rkey) return Font.CR_RED;
@@ -421,30 +482,21 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             double dWidth = smallfont.StringWidth(distStr) * finalScale;
             double dX = screenPos.x - dWidth / 2.0;
             int distColor = (tagStr.Length() == 0) ? tagColor : Font.CR_WHITE;
-
             DrawTextWithOutline(distStr, distColor, dX, textY, finalScale, uiAlpha, outline);
         }
     }
 
+    // --- UI CONTEXT: Read from arrays safely ---
     override void RenderOverlay(RenderEvent e) {
         PlayerInfo player = players[consoleplayer];
-        if (!player || !player.mo || player.mo.health <= 0 || gamestate == GS_TITLELEVEL || automapactive) {
-            return;
-        }
+        if (!player || !player.mo || player.mo.health <= 0 || gamestate == GS_TITLELEVEL || automapactive) return;
 
         InitCVars();
-        if (cv_enabled && !cv_enabled.GetBool()) {
-            return;
-        }
+        if (cv_enabled && !cv_enabled.GetBool()) return;
 
-        if (!isInitialized) {
-            InitializeProjection();
-        }
-
+        if (!isInitialized) InitializeProjection();
         PrepareProjection();
-        if (!isPrepared) {
-            return;
-        }
+        if (!isPrepared) return;
 
         projection.CacheResolution();
         projection.CacheFov(player.fov);
@@ -457,20 +509,63 @@ class KeyHUDTrackerHandler : StaticEventHandler {
         double uiScale = cv_scale ? cv_scale.GetFloat() : 1.0;
         double uiAlpha = cv_alpha ? cv_alpha.GetFloat() : 0.8;
         bool showDist = cv_show_distance ? cv_show_distance.GetBool() : true;
+        
         double maxDist = cv_max_distance ? cv_max_distance.GetFloat() : 0.0;
-        bool trackWeapons = cv_track_weapons ? cv_track_weapons.GetBool() : false;
         bool trackExits = cv_track_exits ? cv_track_exits.GetBool() : true;
         bool trackEntry = cv_track_entry ? cv_track_entry.GetBool() : true;
         bool trackSecrets = cv_track_secrets ? cv_track_secrets.GetBool() : true;
+        bool objLOS = cv_objectives_los ? cv_objectives_los.GetBool() : false;
 
-        // Track Keys & Weapons
-        for (int i = keysInLevel.Size() - 1; i >= 0; i--) {
-            Actor k = keysInLevel[i];
+        bool trackWeapons = cv_track_weapons ? cv_track_weapons.GetBool() : false;
+        bool trackHealth = cv_track_health ? cv_track_health.GetBool() : false;
+        bool trackArmor = cv_track_armor ? cv_track_armor.GetBool() : false;
+        bool trackAmmo = cv_track_ammo ? cv_track_ammo.GetBool() : false;
+        bool trackArtifacts = cv_track_artifacts ? cv_track_artifacts.GetBool() : false;
+        bool itemLOS = cv_items_los ? cv_items_los.GetBool() : false;
+        double maxItemDist = cv_max_item_dist ? cv_max_item_dist.GetFloat() : 50.0;
+
+        // --- Track Keys & World Items ---
+        for (int i = itemsInLevel.Size() - 1; i >= 0; i--) {
+            Actor k = itemsInLevel[i];
             if (!k || k.bDestroyed || (k is "Inventory" && Inventory(k).owner != null)) continue;
-            if (k is "Weapon" && !trackWeapons) continue;
+            
+            bool isWeapon = (k is "Weapon");
+            bool isHealth = (k is "Health");
+            bool isArmor = (k is "Armor");
+            bool isAmmo = (k is "Ammo");
+            bool isArtifact = (k is "PowerupGiver");
+            bool isKey = (k is "Key" || (k is "Inventory" && Inventory(k).bIsKeyItem));
+
+            if (!isKey && !isWeapon && !isHealth && !isArmor && !isAmmo && !isArtifact) {
+                string cname = k.GetClassName();
+                cname.MakeLower();
+                if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) isKey = true;
+                else if (k.sprite == spr_ykey || k.sprite == spr_bkey || k.sprite == spr_rkey || k.sprite == spr_gkey || k.sprite == spr_skey || k.sprite == spr_gold || k.sprite == spr_silv) isKey = true;
+                else continue;
+            }
+
+            bool playerHasIt = (player.mo && k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())));
+            if (isKey && playerHasIt) continue; 
+            if (isWeapon && playerHasIt) {
+                isWeapon = false;
+                isAmmo = true; 
+            }
+
             double distanceUnits = (k.pos - player.mo.pos).Length();
             double distanceMeters = distanceUnits / 32.0;
-            if (maxDist > 0.0 && distanceMeters > maxDist) continue;
+
+            if (isKey) {
+                if (maxDist > 0.0 && distanceMeters > maxDist) continue;
+                if (objLOS && !itemsVisible[i]) continue;
+            } else {
+                if (isWeapon && !trackWeapons) continue;
+                if (isHealth && !trackHealth) continue;
+                if (isArmor && !trackArmor) continue;
+                if (isAmmo && !trackAmmo) continue;
+                if (isArtifact && !trackArtifacts) continue;
+                if (maxItemDist > 0.0 && distanceMeters > maxItemDist) continue;
+                if (itemLOS && !itemsVisible[i]) continue;
+            }
 
             double floatOffset = 4.0 * sin(level.time * 2.0);
             Vector3 keyPos = k.pos + (0, 0, k.height + 8.0 + floatOffset);
@@ -484,30 +579,41 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
             Vector2 texSize = TexMan.GetScaledSize(keyIcon);
             if (texSize.y <= 0.0) continue;
-            
             double targetHeight = 16.0 * (Screen.GetHeight() / 1080.0) * uiScale;
             double scaleFactor = targetHeight / texSize.y;
+            
             screen.DrawTexture(keyIcon, true, screenPos.x, screenPos.y,
                 DTA_DestWidthF, texSize.x * scaleFactor,
                 DTA_DestHeightF, texSize.y * scaleFactor,
                 DTA_CenterOffset, true,
                 DTA_Alpha, uiAlpha);
-
+                
             double resScale = max(1.0, Screen.GetHeight() / 1080.0);
             double finalScale = resScale * uiScale;
             double textHeight = smallfont.GetHeight() * finalScale;
-            
-            // FLIPPED: Turned positive to push the distance meter BELOW the icon center 
             double yOffset = (targetHeight / 2.0) + textHeight / 2.0 + (2.0 * finalScale);
-            DrawHUDMarkerText("", GetKeyColorRange(k), screenPos, yOffset, distanceMeters, showDist, uiAlpha, uiScale);
+
+            string tagStr = "";
+            int tagColor = Font.CR_WHITE;
+            if (isWeapon) { tagStr = "WEAPON"; tagColor = Font.CR_GOLD; }
+            else if (isHealth) { tagStr = "HEALTH"; tagColor = Font.CR_RED; }
+            else if (isArmor) { tagStr = "ARMOR"; tagColor = Font.CR_GREEN; }
+            else if (isAmmo) { tagStr = "AMMO"; tagColor = Font.CR_BROWN; }
+            else if (isArtifact) { tagStr = "POWERUP"; tagColor = Font.CR_PURPLE; }
+            else if (isKey) { tagColor = GetKeyColorRange(k); }
+
+            DrawHUDMarkerText(tagStr, tagColor, screenPos, yOffset, distanceMeters, showDist, uiAlpha, uiScale);
         }
 
-        // Track Level Exits
+        // --- Track Level Exits ---
         if (trackExits) {
             for (int i = 0; i < exitPositionsX.Size(); i++) {
+                if (objLOS && !exitsVisible[i]) continue;
+                
                 Vector3 exitPos = (exitPositionsX[i], exitPositionsY[i], exitPositionsZ[i]);
                 double distanceUnits = (exitPos - player.mo.pos).Length();
                 double distanceMeters = distanceUnits / 32.0;
+                
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
                 double floatOffset = 2.0 * sin(level.time * 2.0 + i);
@@ -515,76 +621,73 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
                 double screenX, screenY;
                 if (!ProjectWorldToScreen(projPos, viewport, screenX, screenY)) continue;
-                Vector2 screenPos = (screenX, screenY);
 
                 int special = exitSpecials[i];
                 string tagStr = (special == 244) ? "SECRET EXIT" : "EXIT";
                 int tagColor = (special == 244) ? Font.CR_GOLD : Font.CR_RED;
-                
-                DrawHUDMarkerText(tagStr, tagColor, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+                DrawHUDMarkerText(tagStr, tagColor, (screenX, screenY), 0, distanceMeters, showDist, uiAlpha, uiScale);
             }
         }
 
-        // Track Level Entry
+        // --- Track Level Entry ---
         if (trackEntry && playEntryPosValid) {
-            double distanceUnits = (playEntryPos - player.mo.pos).Length();
-            double distanceMeters = distanceUnits / 32.0;
+            if (!objLOS || entryVisible) {
+                double distanceUnits = (playEntryPos - player.mo.pos).Length();
+                double distanceMeters = distanceUnits / 32.0;
 
-            if (maxDist <= 0.0 || distanceMeters <= maxDist) {
-                double floatOffset = 2.0 * sin(level.time * 2.0);
-                Vector3 projPos = playEntryPos + (0, 0, 32.0 + floatOffset);
+                if (maxDist <= 0.0 || distanceMeters <= maxDist) {
+                    double floatOffset = 2.0 * sin(level.time * 2.0);
+                    Vector3 projPos = playEntryPos + (0, 0, 32.0 + floatOffset);
 
-                double screenX, screenY;
-                if (ProjectWorldToScreen(projPos, viewport, screenX, screenY)) {
-                    Vector2 screenPos = (screenX, screenY);
-                    DrawHUDMarkerText("START", Font.CR_GREEN, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+                    double screenX, screenY;
+                    if (ProjectWorldToScreen(projPos, viewport, screenX, screenY)) {
+                        DrawHUDMarkerText("START", Font.CR_GREEN, (screenX, screenY), 0, distanceMeters, showDist, uiAlpha, uiScale);
+                    }
                 }
             }
         }
 
-        // Track Secrets
+        // --- Track Secrets ---
         if (trackSecrets) {
             for (int i = 0; i < secretSectors.Size(); i++) {
+                if (objLOS && !secretSecVisible[i]) continue;
+
                 Sector sec = level.sectors[secretSectors[i]];
                 if (!sec || !sec.isSecret()) continue;
 
                 Vector2 center2d = sec.centerspot;
                 double floorZ = sec.floorplane.ZAtPoint(center2d);
                 double ceilZ = sec.ceilingplane.ZAtPoint(center2d);
-                double heightClamp = min((ceilZ - floorZ) * 0.5, 48.0);
-                double midZ = floorZ + heightClamp;
-                Vector3 secretPos = (center2d.x, center2d.y, midZ);
+                Vector3 secretPos = (center2d.x, center2d.y, floorZ + min((ceilZ - floorZ) * 0.5, 48.0));
 
                 double distanceUnits = (secretPos - player.mo.pos).Length();
                 double distanceMeters = distanceUnits / 32.0;
+                
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
                 double floatOffset = 2.0 * sin(level.time * 2.0 + i);
-                Vector3 projPos = secretPos + (0, 0, floatOffset);
-
                 double screenX, screenY;
-                if (!ProjectWorldToScreen(projPos, viewport, screenX, screenY)) continue;
-                Vector2 screenPos = (screenX, screenY);
-
-                DrawHUDMarkerText("SECRET", Font.CR_PURPLE, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+                if (ProjectWorldToScreen(secretPos + (0, 0, floatOffset), viewport, screenX, screenY)) {
+                    DrawHUDMarkerText("SECRET", Font.CR_PURPLE, (screenX, screenY), 0, distanceMeters, showDist, uiAlpha, uiScale);
+                }
             }
 
             for (int i = 0; i < secretActors.Size(); i++) {
+                if (objLOS && !secretActVisible[i]) continue;
+
                 Actor sec = secretActors[i];
                 if (!sec || sec.bDestroyed) continue;
 
                 double distanceUnits = (sec.pos - player.mo.pos).Length();
                 double distanceMeters = distanceUnits / 32.0;
+                
                 if (maxDist > 0.0 && distanceMeters > maxDist) continue;
 
                 double floatOffset = 2.0 * sin(level.time * 2.0 + i + 100);
-                Vector3 projPos = sec.pos + (0, 0, (sec.height * 0.5) + floatOffset);
-
                 double screenX, screenY;
-                if (!ProjectWorldToScreen(projPos, viewport, screenX, screenY)) continue;
-                Vector2 screenPos = (screenX, screenY);
-
-                DrawHUDMarkerText("SECRET", Font.CR_PURPLE, screenPos, 0, distanceMeters, showDist, uiAlpha, uiScale);
+                if (ProjectWorldToScreen(sec.pos + (0, 0, (sec.height * 0.5) + floatOffset), viewport, screenX, screenY)) {
+                    DrawHUDMarkerText("SECRET", Font.CR_PURPLE, (screenX, screenY), 0, distanceMeters, showDist, uiAlpha, uiScale);
+                }
             }
         }
     }
