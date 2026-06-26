@@ -420,25 +420,53 @@ class KeyHUDTrackerHandler : StaticEventHandler {
 
     private bool IsTrackableActor(Actor act) const {
         if (!act || act.bDestroyed) return false;
+        
+        // BUGFIX 1: Prevent monsters, corpses, and non-pickup items from being tracked!
+        // This ensures a "ShotgunGuy" corpse isn't erroneously identified as a weapon.
+        if (!(act is "Inventory") || act.bCORPSE || act.bKILLED || act.bISMONSTER) return false;
+        
+        // Vanilla key detection
         if (act is "Key" || (act is "Inventory" && Inventory(act).bIsKeyItem)) return true;
+        
+        // Standard inventory classes (Weapons, Health, Armor, Ammo, Powerups)
         if (act is "Weapon" || act is "Health" || act is "Armor" || act is "Ammo" || act is "PowerupGiver") return true;
-
+        
+        // Class name detection - expanded keywords for mod compatibility
         string cname = act.GetClassName();
         cname.MakeLower();
         if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) return true;
+        
+        // Broader detection for mod items: look for common keywords
+        if (cname.IndexOf("weapon") != -1 || cname.IndexOf("gun") != -1 || cname.IndexOf("rifle") != -1 || 
+            cname.IndexOf("shotgun") != -1 || cname.IndexOf("plasma") != -1 || cname.IndexOf("rocket") != -1 ||
+            cname.IndexOf("ammo") != -1 || cname.IndexOf("health") != -1 || cname.IndexOf("armor") != -1 ||
+            cname.IndexOf("powerup") != -1 || cname.IndexOf("power") != -1) return true;
+        
+        // Sprite-based detection
         SpriteID spr = act.sprite;
         if (spr == spr_ykey || spr == spr_bkey || spr == spr_rkey || spr == spr_gkey || spr == spr_skey || spr == spr_gold || spr == spr_silv) return true;
+        
         return false;
     }
 
     private ui int GetKeyColorRange(Actor k) const {
         string cname = k.GetClassName();
         cname.MakeLower();
+        
+        // Vanilla key colors
         if (cname.IndexOf("red") != -1 || k.sprite == spr_rkey) return Font.CR_RED;
         if (cname.IndexOf("blue") != -1 || k.sprite == spr_bkey) return Font.CR_BLUE;
         if (cname.IndexOf("yellow") != -1 || k.sprite == spr_ykey || k.sprite == spr_gold) return Font.CR_YELLOW;
         if (cname.IndexOf("green") != -1 || k.sprite == spr_gkey) return Font.CR_GREEN;
         if (cname.IndexOf("silver") != -1 || k.sprite == spr_silv) return Font.CR_GREY;
+        
+        // Smart mod item coloring based on type
+        if (k is "Health" || cname.IndexOf("health") != -1) return Font.CR_RED;
+        if (k is "Armor" || cname.IndexOf("armor") != -1) return Font.CR_BLUE;
+        if (k is "Weapon" || cname.IndexOf("weapon") != -1) return Font.CR_GOLD;
+        if (k is "Ammo" || cname.IndexOf("ammo") != -1) return Font.CR_YELLOW;
+        if (k is "PowerupGiver" || cname.IndexOf("powerup") != -1 || cname.IndexOf("power") != -1) return Font.CR_PURPLE;
+        
         return Font.CR_WHITE;
     }
 
@@ -539,13 +567,45 @@ class KeyHUDTrackerHandler : StaticEventHandler {
             if (!isKey && !isWeapon && !isHealth && !isArmor && !isAmmo && !isArtifact) {
                 string cname = k.GetClassName();
                 cname.MakeLower();
-                if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) isKey = true;
-                else if (k.sprite == spr_ykey || k.sprite == spr_bkey || k.sprite == spr_rkey || k.sprite == spr_gkey || k.sprite == spr_skey || k.sprite == spr_gold || k.sprite == spr_silv) isKey = true;
-                else continue;
+                
+                // Enhanced categorization for mod items
+                if (cname.IndexOf("key") != -1 || cname.IndexOf("card") != -1 || cname.IndexOf("skull") != -1) {
+                    isKey = true;
+                } else if (cname.IndexOf("weapon") != -1 || cname.IndexOf("gun") != -1 || cname.IndexOf("rifle") != -1 || 
+                           cname.IndexOf("shotgun") != -1 || cname.IndexOf("plasma") != -1 || cname.IndexOf("rocket") != -1) {
+                    isWeapon = true;
+                } else if (cname.IndexOf("health") != -1) {
+                    isHealth = true;
+                } else if (cname.IndexOf("armor") != -1) {
+                    isArmor = true;
+                } else if (cname.IndexOf("ammo") != -1) {
+                    isAmmo = true;
+                } else if (cname.IndexOf("powerup") != -1 || cname.IndexOf("power") != -1) {
+                    isArtifact = true;
+                } else if (k.sprite == spr_ykey || k.sprite == spr_bkey || k.sprite == spr_rkey || k.sprite == spr_gkey || k.sprite == spr_skey || k.sprite == spr_gold || k.sprite == spr_silv) {
+                    isKey = true;
+                } else {
+                    continue;
+                }
             }
 
-            bool playerHasIt = (player.mo && k is "Inventory" && player.mo.FindInventory((class<Inventory>)(k.GetClass())));
+            // BUGFIX 2: Properly check if player has the item in their inventory, including powered-up "SisterWeapon" variants
+            bool playerHasIt = false;
+            if (player.mo && k is "Inventory") {
+                playerHasIt = (player.mo.FindInventory((class<Inventory>)(k.GetClass())) != null);
+                
+                // Extra check: if it's a weapon, maybe they have the alternative/sister version?
+                if (!playerHasIt && k is "Weapon") {
+                    class<Weapon> sister = Weapon(k).SisterWeaponType;
+                    if (sister && player.mo.FindInventory(sister)) {
+                        playerHasIt = true;
+                    }
+                }
+            }
+
             if (isKey && playerHasIt) continue; 
+            
+            // CONVERT WEAPON TO AMMO: Changes visual tag to Ammo if player already possesses it
             if (isWeapon && playerHasIt) {
                 isWeapon = false;
                 isAmmo = true; 
@@ -564,7 +624,7 @@ class KeyHUDTrackerHandler : StaticEventHandler {
                 if (isWeapon && !trackWeapons) continue;
                 if (isHealth && !trackHealth) continue;
                 if (isArmor && !trackArmor) continue;
-                if (isAmmo && !trackAmmo) continue;
+                if (isAmmo && !trackAmmo) continue; // It will obey your Ammo tracking CVar rules!
                 if (isArtifact && !trackArtifacts) continue;
                 if (maxItemDist > 0.0 && distanceMeters > maxItemDist) continue;
                 if (itemLOS && !isVis) continue;
